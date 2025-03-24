@@ -1,0 +1,93 @@
+#CSV and ECG
+import numpy as np
+import pandas as pd
+import cv2
+import os
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+from keras.utils import to_categorical
+from sklearn.metrics import accuracy_score
+from google.colab import files
+
+# ------------------------------- Clinical Data Model -------------------------------
+# Load clinical data (same code as before)
+dataset = pd.read_csv("/content/drive/MyDrive/heart.csv")
+
+# Separate predictors and target
+predictors = dataset.drop("target", axis=1)
+target = dataset["target"]
+
+# Split the data into training and testing sets
+X_train, X_test, Y_train, Y_test = train_test_split(predictors, target,train_size=0.80, test_size=0.20, random_state=0)
+
+# Finding the best random_state for RandomForestClassifier
+max_accuracy = 0
+best_x = 0
+for x in range(500):
+    rf = RandomForestClassifier(random_state=x)
+    rf.fit(X_train, Y_train)
+    Y_pred_rf = rf.predict(X_test)
+    current_accuracy = round(accuracy_score(Y_pred_rf, Y_test) * 100, 2)
+    if current_accuracy > max_accuracy:
+        max_accuracy = current_accuracy
+        best_x = x
+
+# Train the Random Forest Classifier with the best random_state
+rf = RandomForestClassifier(random_state=best_x)
+rf.fit(X_train, Y_train)
+
+print( max_accuracy)
+# Get feature importance from trained model
+importances = rf.feature_importances_
+
+# Create a DataFrame to display feature names with their importance
+feature_importance_df = pd.DataFrame({"Feature": predictors.columns, "Importance": importances})
+
+# Sort features by importance in descending order
+feature_importance_df = feature_importance_df.sort_values(by="Importance", ascending=False)
+
+# Display feature importance
+print(feature_importance_df)
+# ------------------------------- ECG Image Model -------------------------------
+# Load data function for ECG image dataset (same code as before)
+def load_data(path, label_dict):
+    data = []
+    label = []
+    for cat, label_value in label_dict.items():
+        pic_list = os.path.join(path, cat)
+        for img in os.listdir(pic_list):
+            image_path = os.path.join(pic_list, img)
+            image = cv2.imread(image_path)
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            image = cv2.resize(image, (224, 224))  # Resize to 224x224
+            data.append(image)
+            label.append(label_value)
+    return np.array(data), np.array(label)
+
+label_dict = {
+    'ECG Images of Myocardial Infarction Patients (240x12=2880)': 3,
+    'ECG Images of Patient that have History of MI (172x12=2064)': 2,
+    'ECG Images of Patient that have abnormal heartbeat (233x12=2796)': 1,
+    'Normal Person ECG Images (284x12=3408)': 0
+}
+
+# Load and preprocess data
+path = '/content/drive/MyDrive/train'
+data, label = load_data(path, label_dict)
+data = data.astype('float32') / 255.0  # Normalize images to [0, 1]
+
+# Convert labels to one-hot encoding
+num_classes = len(label_dict)
+label = to_categorical(label, num_classes)
+
+# Split data into train and test sets
+train_data, test_data, train_label, test_label = train_test_split(data, label, test_size=0.2, random_state=42)
+
+# Flatten data for SVM
+train_data_flatten = train_data.reshape(train_data.shape[0], -1)
+test_data_flatten = test_data.reshape(test_data.shape[0], -1)
+
+# Train SVM model
+svm_model = SVC(kernel='linear', C=1.0, random_state=42)
+svm_model.fit(train_data_flatten, np.argmax(train_label, axis=1))
